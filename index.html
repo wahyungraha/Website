@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Power Monitoring Dashboard</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background-color: #0066cc;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .card {
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #0066cc;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .gauges {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+        .gauge {
+            flex: 1;
+            min-width: 200px;
+            margin: 10px;
+            text-align: center;
+        }
+        .gauge-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #0066cc;
+        }
+        .gauge-label {
+            color: #666;
+        }
+        .charts-container {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .chart-container {
+            flex: 1;
+            min-width: 500px;
+            height: 300px;
+            margin: 10px;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .data-table th {
+            background-color: #f2f2f2;
+        }
+        .data-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        @media (max-width: 768px) {
+            .chart-container {
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Power Monitoring Dashboard</h1>
+        </div>
+
+        <div class="card">
+            <h2>Real-time Power Metrics</h2>
+            <div class="gauges">
+                <div class="gauge">
+                    <div class="gauge-value" id="voltage">--</div>
+                    <div class="gauge-label">Voltage (V)</div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-value" id="current">--</div>
+                    <div class="gauge-label">Current (A)</div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-value" id="power">--</div>
+                    <div class="gauge-label">Power (W)</div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-value" id="energy">--</div>
+                    <div class="gauge-label">Energy (kWh)</div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-value" id="frequency">--</div>
+                    <div class="gauge-label">Frequency (Hz)</div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-value" id="powerFactor">--</div>
+                    <div class="gauge-label">Power Factor</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Power Consumption Trend</h2>
+            <div class="charts-container">
+                <div class="chart-container">
+                    <canvas id="powerChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Power By Minute</h2>
+            <div class="charts-container">
+                <div class="chart-container">
+                    <canvas id="minuteChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Power by Minute Data</h2>
+            <table class="data-table" id="minuteTable">
+                <thead>
+                    <tr>
+                        <th>Minute</th>
+                        <th>Average Power (W)</th>
+                        <th>Min Power (W)</th>
+                        <th>Max Power (W)</th>
+                        <th>Total (Watt-minutes)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be inserted here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBoFZUDMApKwN2FAidNyh27OOuajhZTWwE",
+            databaseURL: "https://coba-d31a3-default-rtdb.asia-southeast1.firebasedatabase.app/",
+            projectId: "coba-d31a3",
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // References to HTML elements
+        const voltageElement = document.getElementById('voltage');
+        const currentElement = document.getElementById('current');
+        const powerElement = document.getElementById('power');
+        const energyElement = document.getElementById('energy');
+        const frequencyElement = document.getElementById('frequency');
+        const powerFactorElement = document.getElementById('powerFactor');
+        const minuteTableBody = document.querySelector('#minuteTable tbody');
+
+        // Chart configurations
+        const powerCtx = document.getElementById('powerChart').getContext('2d');
+        const powerChart = new Chart(powerCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Power (W)',
+                    backgroundColor: 'rgba(0, 102, 204, 0.2)',
+                    borderColor: 'rgba(0, 102, 204, 1)',
+                    data: [],
+                    fill: true,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Power (W)'
+                        }
+                    }
+                }
+            }
+        });
+
+        const minuteCtx = document.getElementById('minuteChart').getContext('2d');
+        const minuteChart = new Chart(minuteCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Average Power by Minute (W)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1,
+                    data: []
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Minute'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Power (W)'
+                        }
+                    }
+                }
+            }
+        });
+
+        // Real-time data update
+        function updateRealTimeData() {
+            // Listen for real-time updates from PowerMonitor
+            const powerMonitorRef = database.ref('/PowerMonitor');
+            powerMonitorRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    // Update gauge values
+                    voltageElement.textContent = data.voltage ? data.voltage.toFixed(1) : '--';
+                    currentElement.textContent = data.current ? data.current.toFixed(2) : '--';
+                    powerElement.textContent = data.power ? data.power.toFixed(1) : '--';
+                    energyElement.textContent = data.energy ? data.energy.toFixed(4) : '--';
+                    frequencyElement.textContent = data.frequency ? data.frequency.toFixed(1) : '--';
+                    powerFactorElement.textContent = data.powerFactor ? data.powerFactor.toFixed(2) : '--';
+
+                    // Update power chart
+                    const now = new Date();
+                    const timeString = now.getHours().toString().padStart(2, '0') + ':' + 
+                                      now.getMinutes().toString().padStart(2, '0') + ':' + 
+                                      now.getSeconds().toString().padStart(2, '0');
+
+                    if (powerChart.data.labels.length > 30) {
+                        powerChart.data.labels.shift();
+                        powerChart.data.datasets[0].data.shift();
+                    }
+
+                    powerChart.data.labels.push(timeString);
+                    powerChart.data.datasets[0].data.push(data.power);
+                    powerChart.update();
+                }
+            });
+        }
+
+        // Minute data update
+        function updateMinuteData() {
+            const powerByMinuteRef = database.ref('/PowerByMinute');
+            powerByMinuteRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    // Clear existing data
+                    minuteChart.data.labels = [];
+                    minuteChart.data.datasets[0].data = [];
+                    minuteTableBody.innerHTML = '';
+
+                    // Process and sort minute data
+                    const minuteData = [];
+                    Object.keys(data).forEach(key => {
+                        if (key.startsWith('minute_')) {
+                            const minuteNumber = parseInt(key.split('_')[1]);
+                            minuteData.push({
+                                minute: minuteNumber,
+                                data: data[key]
+                            });
+                        }
+                    });
+
+                    // Sort by minute number
+                    minuteData.sort((a, b) => a.minute - b.minute);
+
+                    // Update chart and table
+                    minuteData.forEach(item => {
+                        const minuteLabel = `Minute ${item.minute}`;
+                        
+                        // Update chart
+                        minuteChart.data.labels.push(minuteLabel);
+                        minuteChart.data.datasets[0].data.push(item.data.average);
+
+                        // Update table
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${minuteLabel}</td>
+                            <td>${item.data.average ? item.data.average.toFixed(2) : '--'}</td>
+                            <td>${item.data.min ? item.data.min.toFixed(2) : '--'}</td>
+                            <td>${item.data.max ? item.data.max.toFixed(2) : '--'}</td>
+                            <td>${item.data.total ? item.data.total.toFixed(2) : '--'}</td>
+                        `;
+                        minuteTableBody.appendChild(row);
+                    });
+
+                    minuteChart.update();
+                }
+            });
+        }
+
+        // Initialize the dashboard
+        updateRealTimeData();
+        updateMinuteData();
+    </script>
+</body>
+</html>
